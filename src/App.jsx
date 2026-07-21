@@ -80,7 +80,7 @@ function KpiCard({ label, value, sub, tone }) {
 }
 
 /* ── App principal ── */
-export default function App() {
+export default function App({ user, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
@@ -365,7 +365,10 @@ export default function App() {
           ))}
         </nav>
         <button className="nav-item settings-btn" onClick={()=>setModal({type:"settings"})}><Settings size={17}/><span>Ajustes</span></button>
-        <p className="shared-note">Datos compartidos con tu equipo</p>
+        <div className="user-bar">
+          <span className="user-email" title={user?.email}>{user?.email}</span>
+          <button className="btn-logout" onClick={onLogout}>Salir</button>
+        </div>
       </aside>
 
       <main className="main">
