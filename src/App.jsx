@@ -5,7 +5,7 @@ import { doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import {
   LayoutDashboard, Package, ShoppingCart, Wallet, BarChart3, Plus, Trash2,
   Pencil, X, Search, Settings, AlertTriangle, Loader2, ClipboardList,
-  Receipt, Users, CheckCircle2, ChevronDown, ChevronUp
+  Receipt, Users, CheckCircle2, ChevronDown, ChevronUp, ChevronsUpDown
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -37,6 +37,10 @@ function startOfWeek(date) { const d = new Date(date); const day = d.getDay(); c
 // storage: Firebase Firestore (ver firebase.js)
 
 /* ── Componentes pequeños ── */
+function SortTh({ label, num, active, dir, onClick }) {
+  const Icon = !active ? ChevronsUpDown : dir === "asc" ? ChevronUp : ChevronDown;
+  return <th className={`sortable${num?" num":""}${active?" sorted":""}`} onClick={onClick} title="Ordenar"><span className="th-inner">{label}<Icon size={12}/></span></th>;
+}
 function Badge({ tone = "neutral", children }) { return <span className={`badge badge-${tone}`}>{children}</span>; }
 function StockBadge({ stock }) {
   if (stock <= 0) return <Badge tone="negative">Sin stock</Badge>;
@@ -93,6 +97,12 @@ export default function App({ user, onLogout }) {
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState(null);
   const [stockSearch, setStockSearch] = useState("");
+  const [stockSort, setStockSort] = useState(()=>{try{return JSON.parse(localStorage.getItem("ms_stockSort"))||{key:null,dir:"asc"};}catch{return {key:null,dir:"asc"};}});
+  useEffect(()=>{try{localStorage.setItem("ms_stockSort",JSON.stringify(stockSort));}catch{}},[stockSort]);
+  function toggleStockSort(key) {
+    // 1er clic: ascendente · 2do: descendente · 3ro: vuelve al orden de carga
+    setStockSort(cur=>cur.key!==key?{key,dir:"asc"}:cur.dir==="asc"?{key,dir:"desc"}:{key:null,dir:"asc"});
+  }
   const [salesSearch, setSalesSearch] = useState("");
   const [financeFilter, setFinanceFilter] = useState("todos");
   const [reportRange, setReportRange] = useState("month");
@@ -303,7 +313,22 @@ export default function App({ user, onLogout }) {
   },[sales]);
 
   const recentSales = useMemo(()=>[...sales].sort((a,b)=>b.createdAt-a.createdAt).slice(0,5),[sales]);
-  const filteredProducts = useMemo(()=>{const q=stockSearch.trim().toLowerCase();if(!q)return products;return products.filter(p=>[p.name,p.category,p.sku,p.color].join(" ").toLowerCase().includes(q));},[products,stockSearch]);
+  const filteredProducts = useMemo(()=>{
+    const q=stockSearch.trim().toLowerCase();
+    let list=!q?[...products]:products.filter(p=>[p.name,p.category,p.sku,p.color].join(" ").toLowerCase().includes(q));
+    const {key,dir}=stockSort;
+    if (key) {
+      const val=p=>key==="priceCard"?cardPrice(p):p[key];
+      const sign=dir==="asc"?1:-1;
+      list.sort((a,b)=>{
+        const x=val(a), y=val(b);
+        if (typeof x==="number"&&typeof y==="number") return (x-y)*sign;
+        // orden natural: "A2" va antes que "A10"
+        return String(x??"").localeCompare(String(y??""),"es",{numeric:true,sensitivity:"base"})*sign;
+      });
+    }
+    return list;
+  },[products,stockSearch,stockSort]);
   const filteredSales = useMemo(()=>{const q=salesSearch.trim().toLowerCase();const list=[...sales].sort((a,b)=>b.createdAt-a.createdAt);if(!q)return list;return list.filter(s=>[s.productName,s.customer,s.paymentMethod].join(" ").toLowerCase().includes(q));},[sales,salesSearch]);
   const filteredTx = useMemo(()=>{const list=[...transactions].sort((a,b)=>b.createdAt-a.createdAt);if(financeFilter==="todos")return list;return list.filter(t=>t.type===financeFilter);},[transactions,financeFilter]);
 
@@ -463,7 +488,7 @@ export default function App({ user, onLogout }) {
                 ):(
                   <div className="card no-pad">
                     <table className="table">
-                      <thead><tr><th>Producto</th><th>Categoría</th><th>Talle</th><th>Color</th><th>SKU</th><th className="num">Efec/Deb/QR</th><th className="num">Tarjeta</th><th className="num">Stock</th><th>Estado</th><th></th></tr></thead>
+                      <thead><tr>{[["name","Producto"],["category","Categoría"],["talle","Talle"],["color","Color"],["sku","SKU"],["price","Efec/Deb/QR",true],["priceCard","Tarjeta",true],["stock","Stock",true]].map(([k,l,num])=><SortTh key={k} label={l} num={num} active={stockSort.key===k} dir={stockSort.dir} onClick={()=>toggleStockSort(k)}/>)}<th>Estado</th><th></th></tr></thead>
                       <tbody>
                         {filteredProducts.map(p=>(
                           <tr key={p.id}><td>{p.name}</td><td>{p.category}</td><td>{p.talle}</td><td>{p.color||"—"}</td><td className="mono dim">{p.sku}</td><td className="num mono">{money(p.price)}</td><td className="num mono">{money(cardPrice(p))}</td><td className="num mono">{p.stock}</td><td><StockBadge stock={p.stock}/></td>
@@ -837,6 +862,8 @@ const CSS = `
 .nav-item:hover{background:var(--surface-2);}.nav-item.active{background:var(--accent-soft);color:var(--accent);font-weight:600;}
 .nav-badge{position:absolute;right:10px;background:var(--warning);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;}
 .settings-btn{border-top:1px solid var(--border);margin-top:6px;padding-top:12px;}
+.table th.sortable{cursor:pointer;user-select:none;}.table th.sortable:hover{color:var(--ink-soft);}.table th.sorted{color:#2F5D62;}
+.th-inner{display:inline-flex;align-items:center;gap:4px;}.table th.sortable svg{opacity:0.45;}.table th.sorted svg{opacity:1;}
 .user-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 10px 2px;border-top:1px solid var(--border);margin-top:4px;}
 .user-email{font-size:12px;color:var(--slate);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .btn-logout{flex-shrink:0;border:1px solid var(--border);background:transparent;color:var(--ink-soft);font-size:12px;font-family:inherit;padding:4px 10px;border-radius:6px;cursor:pointer;}
