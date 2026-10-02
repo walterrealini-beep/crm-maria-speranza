@@ -16,7 +16,10 @@ const COL = "crm"; // colección de Firestore
 const LOW_STOCK = 3;
 const CATEGORY_SUGGESTIONS = ["Remeras", "Pantalones", "Vestidos", "Camisas", "Buzos / Abrigos", "Accesorios"];
 const TALLE_SUGGESTIONS = ["XS", "S", "M", "L", "XL", "Único", "36", "38", "40", "42"];
-const PAYMENT_METHODS = ["Efectivo", "Transferencia", "Tarjeta", "Cuenta corriente", "Otro"];
+const PAYMENT_METHODS = ["Efectivo", "Débito", "QR", "Transferencia", "Tarjeta", "Cuenta corriente", "Otro"];
+const CARD_METHODS = ["Tarjeta"]; // métodos que usan el "Precio Tarjeta"
+function cardPrice(p) { return p.priceCard ?? p.price; } // productos viejos sin precio tarjeta usan el de efectivo
+function priceFor(p, method) { return CARD_METHODS.includes(method) ? cardPrice(p) : p.price; }
 const SETTLE_METHODS = ["Efectivo", "Transferencia", "Tarjeta", "Otro"];
 const INCOME_CATS = ["Otro ingreso", "Devolución de proveedor", "Aporte de capital"];
 const EXPENSE_CATS = ["Alquiler", "Insumos", "Sueldos", "Impuestos", "Servicios", "Otro"];
@@ -135,20 +138,21 @@ export default function App({ user, onLogout }) {
   }
 
   /* ── Productos ── */
-  function openAddProduct() { setProductForm({ name:"",category:"",talle:"",color:"",sku:"",price:"",cost:"",stock:"" }); setFormError(""); setModal({type:"product",editingId:null}); }
-  function openEditProduct(p) { setProductForm({name:p.name,category:p.category,talle:p.talle,color:p.color,sku:p.sku,price:String(p.price),cost:String(p.cost),stock:String(p.stock)}); setFormError(""); setModal({type:"product",editingId:p.id}); }
+  function openAddProduct() { setProductForm({ name:"",category:"",talle:"",color:"",sku:"",price:"",priceCard:"",cost:"",stock:"" }); setFormError(""); setModal({type:"product",editingId:null}); }
+  function openEditProduct(p) { setProductForm({name:p.name,category:p.category,talle:p.talle,color:p.color,sku:p.sku,price:String(p.price),priceCard:String(cardPrice(p)),cost:String(p.cost),stock:String(p.stock)}); setFormError(""); setModal({type:"product",editingId:p.id}); }
   function submitProduct() {
     const f = productForm;
     if (!f.name.trim()) return setFormError("El nombre es obligatorio.");
-    const price = parseFloat(f.price), cost = parseFloat(f.cost||"0"), stock = parseInt(f.stock||"0",10);
-    if (isNaN(price)||price<0) return setFormError("Ingresá un precio de venta válido.");
+    const price = parseFloat(f.price), priceCard = parseFloat(f.priceCard), cost = parseFloat(f.cost||"0"), stock = parseInt(f.stock||"0",10);
+    if (isNaN(price)||price<0) return setFormError("Ingresá un precio Efec/Deb/QR válido.");
+    if (isNaN(priceCard)||priceCard<0) return setFormError("Ingresá un precio Tarjeta válido.");
     if (isNaN(stock)||stock<0) return setFormError("Ingresá una cantidad de stock válida.");
     const sku = f.sku.trim()||(f.name.slice(0,3)+(f.talle||"U").slice(0,2)+uid().slice(-3)).toUpperCase();
     if (modal.editingId) {
-      updateProducts(products.map(p=>p.id===modal.editingId?{...p,name:f.name.trim(),category:f.category.trim()||"Sin categoría",talle:f.talle.trim()||"Único",color:f.color.trim(),sku,price,cost:isNaN(cost)?0:cost,stock}:p));
+      updateProducts(products.map(p=>p.id===modal.editingId?{...p,name:f.name.trim(),category:f.category.trim()||"Sin categoría",talle:f.talle.trim()||"Único",color:f.color.trim(),sku,price,priceCard,cost:isNaN(cost)?0:cost,stock}:p));
       showToast("Producto actualizado");
     } else {
-      updateProducts([...products,{id:uid(),name:f.name.trim(),category:f.category.trim()||"Sin categoría",talle:f.talle.trim()||"Único",color:f.color.trim(),sku,price,cost:isNaN(cost)?0:cost,stock,createdAt:Date.now()}]);
+      updateProducts([...products,{id:uid(),name:f.name.trim(),category:f.category.trim()||"Sin categoría",talle:f.talle.trim()||"Único",color:f.color.trim(),sku,price,priceCard,cost:isNaN(cost)?0:cost,stock,createdAt:Date.now()}]);
       showToast("Producto agregado");
     }
     setModal(null);
@@ -163,7 +167,11 @@ export default function App({ user, onLogout }) {
   }
   function onSaleProductChange(productId) {
     const prod = products.find(p=>p.id===productId);
-    setSaleForm({...saleForm,productId,unitPrice:prod?String(prod.price):""});
+    setSaleForm({...saleForm,productId,unitPrice:prod?String(priceFor(prod,saleForm.paymentMethod)):""});
+  }
+  function onSalePaymentChange(paymentMethod) {
+    const prod = products.find(p=>p.id===saleForm.productId);
+    setSaleForm({...saleForm,paymentMethod,unitPrice:prod?String(priceFor(prod,paymentMethod)):saleForm.unitPrice});
   }
   function submitSale() {
     const f = saleForm;
@@ -455,14 +463,14 @@ export default function App({ user, onLogout }) {
                 ):(
                   <div className="card no-pad">
                     <table className="table">
-                      <thead><tr><th>Producto</th><th>Categoría</th><th>Talle</th><th>Color</th><th>SKU</th><th className="num">Precio</th><th className="num">Stock</th><th>Estado</th><th></th></tr></thead>
+                      <thead><tr><th>Producto</th><th>Categoría</th><th>Talle</th><th>Color</th><th>SKU</th><th className="num">Efec/Deb/QR</th><th className="num">Tarjeta</th><th className="num">Stock</th><th>Estado</th><th></th></tr></thead>
                       <tbody>
                         {filteredProducts.map(p=>(
-                          <tr key={p.id}><td>{p.name}</td><td>{p.category}</td><td>{p.talle}</td><td>{p.color||"—"}</td><td className="mono dim">{p.sku}</td><td className="num mono">{money(p.price)}</td><td className="num mono">{p.stock}</td><td><StockBadge stock={p.stock}/></td>
+                          <tr key={p.id}><td>{p.name}</td><td>{p.category}</td><td>{p.talle}</td><td>{p.color||"—"}</td><td className="mono dim">{p.sku}</td><td className="num mono">{money(p.price)}</td><td className="num mono">{money(cardPrice(p))}</td><td className="num mono">{p.stock}</td><td><StockBadge stock={p.stock}/></td>
                             <td className="actions"><button className="icon-btn" onClick={()=>openEditProduct(p)}><Pencil size={14}/></button><button className="icon-btn danger" onClick={()=>setModal({type:"confirmDeleteProduct",id:p.id,name:p.name})}><Trash2 size={14}/></button></td>
                           </tr>
                         ))}
-                        {!filteredProducts.length&&<tr><td colSpan={9} className="muted center">Sin resultados para esa búsqueda.</td></tr>}
+                        {!filteredProducts.length&&<tr><td colSpan={10} className="muted center">Sin resultados para esa búsqueda.</td></tr>}
                       </tbody>
                     </table>
                   </div>
@@ -696,7 +704,10 @@ export default function App({ user, onLogout }) {
               <Field label="SKU (opcional)"><input className="input mono" value={productForm.sku} onChange={e=>setProductForm({...productForm,sku:e.target.value})} placeholder="Se genera solo"/></Field>
             </div>
             <div className="form-row">
-              <Field label="Precio de venta"><input className="input mono" type="number" min="0" step="0.01" value={productForm.price} onChange={e=>setProductForm({...productForm,price:e.target.value})} placeholder="0"/></Field>
+              <Field label="Precio Efec/Deb/QR"><input className="input mono" type="number" min="0" step="0.01" value={productForm.price} onChange={e=>setProductForm({...productForm,price:e.target.value})} placeholder="0"/></Field>
+              <Field label="Precio Tarjeta"><input className="input mono" type="number" min="0" step="0.01" value={productForm.priceCard} onChange={e=>setProductForm({...productForm,priceCard:e.target.value})} placeholder="0"/></Field>
+            </div>
+            <div className="form-row">
               <Field label="Costo (opcional)"><input className="input mono" type="number" min="0" step="0.01" value={productForm.cost} onChange={e=>setProductForm({...productForm,cost:e.target.value})} placeholder="0"/></Field>
             </div>
             <Field label="Stock inicial"><input className="input mono" type="number" min="0" step="1" value={productForm.stock} onChange={e=>setProductForm({...productForm,stock:e.target.value})} placeholder="0"/></Field>
@@ -716,7 +727,7 @@ export default function App({ user, onLogout }) {
             </div>
             <div className="form-row">
               <Field label="Fecha"><input className="input" type="date" value={saleForm.date} onChange={e=>setSaleForm({...saleForm,date:e.target.value})}/></Field>
-              <Field label="Método de pago"><select className="input" value={saleForm.paymentMethod} onChange={e=>setSaleForm({...saleForm,paymentMethod:e.target.value})}>{PAYMENT_METHODS.map(m=><option key={m} value={m}>{m}</option>)}</select></Field>
+              <Field label="Método de pago"><select className="input" value={saleForm.paymentMethod} onChange={e=>onSalePaymentChange(e.target.value)}>{PAYMENT_METHODS.map(m=><option key={m} value={m}>{m}</option>)}</select></Field>
             </div>
             <Field label={saleForm.paymentMethod==="Cuenta corriente"?"Cliente (obligatorio para cuenta corriente)":"Cliente (opcional)"}><input className="input" value={saleForm.customer} onChange={e=>setSaleForm({...saleForm,customer:e.target.value})} placeholder="Nombre del cliente"/></Field>
             {saleForm.paymentMethod==="Cuenta corriente"&&<p className="info-note">💡 Se creará (o actualizará) la cuenta corriente de este cliente automáticamente.</p>}
@@ -826,6 +837,10 @@ const CSS = `
 .nav-item:hover{background:var(--surface-2);}.nav-item.active{background:var(--accent-soft);color:var(--accent);font-weight:600;}
 .nav-badge{position:absolute;right:10px;background:var(--warning);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;}
 .settings-btn{border-top:1px solid var(--border);margin-top:6px;padding-top:12px;}
+.user-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 10px 2px;border-top:1px solid var(--border);margin-top:4px;}
+.user-email{font-size:12px;color:var(--slate);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.btn-logout{flex-shrink:0;border:1px solid var(--border);background:transparent;color:var(--ink-soft);font-size:12px;font-family:inherit;padding:4px 10px;border-radius:6px;cursor:pointer;}
+.btn-logout:hover{background:var(--negative);border-color:var(--negative);color:#fff;}
 .shared-note{font-size:10.5px;color:var(--slate);padding:6px 10px 0;}
 .main{flex:1;padding:26px 30px 40px;overflow-y:auto;height:100%;}
 .page-head{margin-bottom:18px;}.page-head.row{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;}.page-head p{margin:4px 0 0;color:var(--slate);font-size:13px;}
@@ -879,5 +894,5 @@ const CSS = `
 .spin{animation:spin .9s linear infinite;}@keyframes spin{to{transform:rotate(360deg);}}
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:999px;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,0.25);z-index:60;}
 @media(max-width:820px){.grid-2{grid-template-columns:1fr;}.acc-right{flex-direction:column;align-items:flex-end;gap:6px;}}
-@media(max-width:700px){.msapp{flex-direction:column;height:100vh;}.sidebar{width:100%;height:auto;flex-direction:row;align-items:center;overflow-x:auto;overflow-y:visible;padding:10px 14px;flex-shrink:0;}.brand{border-bottom:none;border-right:1px solid var(--border);padding:0 14px 0 0;margin:0 10px 0 0;}.nav{flex-direction:row;flex:none;}.settings-btn{border-top:none;border-left:1px solid var(--border);margin:0;padding:9px 10px 9px 14px;}.shared-note{display:none;}.nav-item span{display:none;}.main{padding:18px 16px 32px;height:auto;flex:1;}.form-row{grid-template-columns:1fr;}}
+@media(max-width:700px){.msapp{flex-direction:column;height:100vh;}.sidebar{width:100%;height:auto;flex-direction:row;align-items:center;overflow-x:auto;overflow-y:visible;padding:10px 14px;flex-shrink:0;}.brand{border-bottom:none;border-right:1px solid var(--border);padding:0 14px 0 0;margin:0 10px 0 0;}.nav{flex-direction:row;flex:none;}.settings-btn{border-top:none;border-left:1px solid var(--border);margin:0;padding:9px 10px 9px 14px;}.shared-note{display:none;}.user-bar{border-top:none;margin:0;padding:0 0 0 10px;}.user-email{display:none;}.nav-item span{display:none;}.main{padding:18px 16px 32px;height:auto;flex:1;}.form-row{grid-template-columns:1fr;}}
 `;
